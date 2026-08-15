@@ -2,7 +2,7 @@ from pathlib import Path
 from collections import namedtuple
 import cv2
 import os
-import config
+from . import config
 
 PlayerData = namedtuple("PlayerData", ["id", "min_x", "min_y", "max_x", "max_y"])
 
@@ -16,6 +16,8 @@ def parse(path: str) -> dict[str, list]:
 
     ret: dict[str, list] = {}
 
+    print("Parsing player images...")
+
     for image_file in [f for f in images_folder.iterdir() if f.is_file()]:
         img = cv2.imread(image_file.absolute())
 
@@ -28,34 +30,47 @@ def parse(path: str) -> dict[str, list]:
         img = cv2.resize(img, config.FINAL_IMAGE_SIZE)
         ret[image_file.stem] = [img]
 
+    print("Parsing player data...")
+
     for data_file in [f for f in data_folder.iterdir() if f.is_file()]:
-        with open(data_file.absolute(), "r") as data:
-            content = data.read()
-            players = content.split("\n")
-            p1 = players[0].split(" ")
-            p2 = players[1].split(" ")
+        with open(data_file.absolute(), "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
 
-            p1xc = float(p1[1])
-            p1yc = float(p1[2])
-            p1w = float(p1[3])
-            p1h = float(p1[4])
+                parts = line.split()
+                class_id = int(parts[0])
+                xc, yc, w, h = map(float, parts[1:])
 
-            p1x1 = (p1xc - p1w / 2.0) * config.FINAL_IMAGE_SIZE[0]
-            p1y1 = (p1yc - p1h / 2.0) * config.FINAL_IMAGE_SIZE[1]
-            p1x2 = (p1xc + p1w / 2.0) * config.FINAL_IMAGE_SIZE[0]
-            p1y2 = (p1yc + p1h / 2.0) * config.FINAL_IMAGE_SIZE[1]
+                # Convert normalized YOLO format to target pixel bounding box
+                x1 = (xc - w / 2.0) * config.FINAL_IMAGE_SIZE[0]
+                y1 = (yc - h / 2.0) * config.FINAL_IMAGE_SIZE[1]
+                x2 = (xc + w / 2.0) * config.FINAL_IMAGE_SIZE[0]
+                y2 = (yc + h / 2.0) * config.FINAL_IMAGE_SIZE[1]
 
-            p2xc = float(p2[1])
-            p2yc = float(p2[2])
-            p2w = float(p2[3])
-            p2h = float(p2[4])
-
-            p2x1 = (p2xc - p2w / 2.0) * config.FINAL_IMAGE_SIZE[0]
-            p2y1 = (p2yc - p2h / 2.0) * config.FINAL_IMAGE_SIZE[1]
-            p2x2 = (p2xc + p2w / 2.0) * config.FINAL_IMAGE_SIZE[0]
-            p2y2 = (p2yc + p2h / 2.0) * config.FINAL_IMAGE_SIZE[1]
-
-            ret[data_file.stem].append(PlayerData(1, p1x1, p1y1, p1x2, p1y2))
-            ret[data_file.stem].append(PlayerData(2, p2x1, p2y1, p2x2, p2y2))
+                ret[data_file.stem].append(PlayerData(class_id, x1, y1, x2, y2))
 
     return ret
+
+
+def preview_sample(parsed_data: dict, sample_key: str | None = None):
+    # Grab the first item if no key provided
+    if sample_key is None:
+        sample_key = next(iter(parsed_data))
+
+    items = parsed_data[sample_key]
+    img = items[0].copy()  # Get resized RGB image
+    players = items[1:]  # Get PlayerData objects
+
+    # Convert RGB back to BGR for OpenCV display
+    display_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    for player in players:
+        pt1 = (int(player.min_x), int(player.min_y))
+        pt2 = (int(player.max_x), int(player.max_y))
+        cv2.rectangle(display_img, pt1, pt2, (0, 255, 0), 2)
+
+    cv2.imshow(f"Sample: {sample_key}", display_img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
