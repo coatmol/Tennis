@@ -7,7 +7,7 @@ from . import config
 PlayerData = namedtuple("PlayerData", ["id", "min_x", "min_y", "max_x", "max_y"])
 
 
-def parse(path: str) -> dict[str, list]:
+def parse_players(path: str) -> dict[str, list]:
     images_path = f"{path}/images"
     data_path = f"{path}/data"
 
