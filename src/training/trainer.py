@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 from model import *
 import config
+import torchvision.transforms.v2 as v2
 
 
 def train_model(
@@ -28,8 +29,15 @@ def train_model(
         criterion = FocalDetectionLoss(
             alpha=0.25, gamma=2.0, lambda_box=config.LAMBDA_BOX
         )
+        # GPU-accelerated augmentations
+        gpu_transforms = v2.Compose([
+            v2.RandomApply([v2.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)], p=0.8),
+            v2.RandomApply([v2.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))], p=0.5),
+            v2.RandomAdjustSharpness(sharpness_factor=2.0, p=0.5),
+        ]).to(device)
     else:
         criterion = DetectionLoss(lambda_box=config.LAMBDA_BOX)
+        gpu_transforms = None
 
     print(f"Training on device: {device}")
 
@@ -43,6 +51,9 @@ def train_model(
 
         for images, batch_boxes in train_loader:
             images = images.to(device)
+            
+            if gpu_transforms is not None:
+                images = gpu_transforms(images)
 
             # Build Targets on the fly
             if is_ball_model:
