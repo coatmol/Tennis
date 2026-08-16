@@ -10,28 +10,32 @@ import argparse
 
 
 def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos, stationary_count):
-    # Preprocess Frame
+    # Preprocess Frame for Player Model
     h_orig, w_orig = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     resized = cv2.resize(frame_rgb, (640, 384))
     tensor_img = torch.from_numpy(resized).permute(2, 0, 1).float().unsqueeze(0) / 255.0
     tensor_img = tensor_img.to(device)
 
-    # Predict
+    # Predict Players (Custom PyTorch)
     with torch.no_grad():
         pred_conf_player, pred_boxes_player = player_model(tensor_img)
-        pred_conf_ball, pred_boxes_ball = ball_model(tensor_img)
         
         # Squeeze batch dimension and decode
         p_boxes, p_scores = decode_predictions(
             pred_conf_player[0], pred_boxes_player[0], 
             conf_thresh=config.PLAYER_CONF_THRESH, max_detections=2
         )
-        # Decode top 5 balls
-        b_boxes_all, b_scores_all = decode_predictions(
-            pred_conf_ball[0], pred_boxes_ball[0], 
-            conf_thresh=config.BALL_CONF_THRESH, max_detections=5
-        )
+        
+    # Predict Ball (YOLO)
+    b_boxes_all = []
+    b_scores_all = []
+    
+    if ball_model is not None:
+        yolo_results = ball_model.predict(source=resized, imgsz=640, conf=config.BALL_CONF_THRESH, verbose=False)
+        for box in yolo_results[0].boxes:
+            b_boxes_all.append(box.xyxy[0]) # Tensor of [x1, y1, x2, y2]
+            b_scores_all.append(box.conf[0].item())
 
     # Scale boxes back to original video resolution
     scale_x = w_orig / config.FINAL_IMAGE_SIZE[0]
@@ -198,13 +202,17 @@ def main():
     )
     player_model.to(device).eval()
 
-    # Load Ball Model
-    ball_model = BallDetectionModel(pretrained=False)
-    if os.path.exists("output/tennis_ball_detector.pth"):
-        ball_model.load_state_dict(
-            torch.load("output/tennis_ball_detector.pth", map_location=device, weights_only=True)
-        )
-    ball_model.to(device).eval()
+    # Load Ball Model (YOLOv8)
+    ball_model = None
+    yolo_weights = "output/yolo_balls/weights/best.pt"
+    try:
+        from ultralytics import YOLO
+        if os.path.exists(yolo_weights):
+            ball_model = YOLO(yolo_weights)
+        else:
+            print(f"Warning: YOLO weights not found at {yolo_weights}. Ball detection skipped.")
+    except ImportError:
+        print("Warning: ultralytics package not found. Please 'pip install ultralytics'. Ball detection skipped.")
 
     input_video_path = "input/input_video.mp4"
     frames = read_video(input_video_path)
