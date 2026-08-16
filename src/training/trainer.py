@@ -94,7 +94,9 @@ def train_model(model, train_loader, val_loader, epochs=20, lr=None, device="cud
             f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Time Taken: {epoch_time:.2f}s"
         )
 
+    import os
     # Save trained model weights
     save_path = "output/tennis_ball_detector.pth" if is_ball_model else "output/tennis_player_detector.pth"
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save(model.state_dict(), save_path)
     print(f"Model weights successfully saved to {save_path}!")
