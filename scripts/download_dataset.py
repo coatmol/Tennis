@@ -1,6 +1,10 @@
 from huggingface_hub import snapshot_download
+from dotenv import load_dotenv
+import os
 
-HF_PUBLIC_TOKEN = "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"
+load_dotenv()
+
+HF_PUBLIC_TOKEN = os.environ.get("HF_PUBLIC_TOKEN")
 REPO = "Coatmol/Tennis"
 HEADERS = {"Authorization": f"Bearer {HF_PUBLIC_TOKEN}"}
 

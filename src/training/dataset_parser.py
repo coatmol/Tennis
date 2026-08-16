@@ -4,6 +4,7 @@ import cv2
 import config
 
 PlayerData = namedtuple("PlayerData", ["id", "min_x", "min_y", "max_x", "max_y"])
+BallData = namedtuple("BallData", ["min_x", "min_y", "max_x", "max_y"])
 
 
 def parse_players(path: str) -> dict[str, list]:
@@ -32,6 +33,9 @@ def parse_players(path: str) -> dict[str, list]:
     print("Parsing player data...")
 
     for data_file in [f for f in data_folder.iterdir() if f.is_file()]:
+        if data_file.stem not in ret:
+            continue
+
         with open(data_file.absolute(), "r") as f:
             for line in f:
                 line = line.strip()
@@ -49,6 +53,58 @@ def parse_players(path: str) -> dict[str, list]:
                 y2 = (yc + h / 2.0) * config.FINAL_IMAGE_SIZE[1]
 
                 ret[data_file.stem].append(PlayerData(class_id, x1, y1, x2, y2))
+
+    # Optional: clean up any images that had no bounding boxes
+    # ret = {k: v for k, v in ret.items() if len(v) > 1}
+
+    return ret
+
+
+def parse_balls(path: str) -> dict[str, list]:
+    images_path = f"{path}/images"
+    data_path = f"{path}/data"
+
+    images_folder = Path(images_path)
+    data_folder = Path(data_path)
+
+    ret: dict[str, list] = {}
+
+    print("Parsing ball images...")
+
+    for image_file in [f for f in images_folder.iterdir() if f.is_file()]:
+        img = cv2.imread(image_file.absolute())
+
+        if img is None:
+            raise FileNotFoundError(
+                f"Could not read image from path: {image_file.absolute()}"
+            )
+
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, config.FINAL_IMAGE_SIZE)
+        ret[image_file.stem] = [img]
+
+    print("Parsing ball data...")
+
+    for data_file in [f for f in data_folder.iterdir() if f.is_file()]:
+        if data_file.stem not in ret:
+            continue
+
+        with open(data_file.absolute(), "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                parts = line.split()
+                xc, yc, w, h = map(float, parts[1:])
+
+                # Convert normalized YOLO format to target pixel bounding box
+                x1 = (xc - w / 2.0) * config.FINAL_IMAGE_SIZE[0]
+                y1 = (yc - h / 2.0) * config.FINAL_IMAGE_SIZE[1]
+                x2 = (xc + w / 2.0) * config.FINAL_IMAGE_SIZE[0]
+                y2 = (yc + h / 2.0) * config.FINAL_IMAGE_SIZE[1]
+
+                ret[data_file.stem].append(BallData(x1, y1, x2, y2))
 
     return ret
 

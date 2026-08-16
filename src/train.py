@@ -6,10 +6,10 @@ import random
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    data = parse_players("input/dataset/players")
+    full_player_data = parse_players("input/dataset/players")
 
     # Split keys into Train (80%) and Validation (20%)
-    all_keys = list(data.keys())
+    all_keys = list(full_player_data.keys())
     random.seed(42)  # Seed for reproducible splits
     random.shuffle(all_keys)
 
@@ -17,8 +17,8 @@ if __name__ == "__main__":
     train_keys = all_keys[:split_idx]
     val_keys = all_keys[split_idx:]
 
-    train_data = {k: data[k] for k in train_keys}
-    val_data = {k: data[k] for k in val_keys}
+    train_data = {k: full_player_data[k] for k in train_keys}
+    val_data = {k: full_player_data[k] for k in val_keys}
 
     # Wrap in your PyTorch Dataset class
     train_dataset = PlayerDataset(train_data)
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     # Create PyTorch DataLoaders
     train_loader = DataLoader(
         train_dataset,
-        batch_size=16,  # Adjust based on GPU VRAM
+        batch_size=config.BATCH_SIZE,  # Adjust based on GPU VRAM
         shuffle=True,  # Shuffle every epoch for training
         collate_fn=collate_fn,  # Handles variable number of player boxes per image
         num_workers=2,  # Parallel data loading
@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=16,
+        batch_size=config.BATCH_SIZE,
         shuffle=False,  # No need to shuffle validation data
         collate_fn=collate_fn,
         num_workers=2,

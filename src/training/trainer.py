@@ -2,13 +2,21 @@ import time
 import torch
 from torch.utils.data import DataLoader
 from model import *
+import config
 
 
-def train_model(model, train_loader, val_loader, epochs=20, lr=1e-3, device="cuda"):
+def train_model(model, train_loader, val_loader, epochs=20, lr=None, device="cuda", is_ball_model=False):
+    if lr is None:
+        lr = config.LEARNING_RATE
+
     model = model.to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=config.WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    criterion = DetectionLoss(lambda_box=5.0)
+    
+    if is_ball_model:
+        criterion = FocalDetectionLoss(alpha=0.25, gamma=2.0, lambda_box=config.LAMBDA_BOX)
+    else:
+        criterion = DetectionLoss(lambda_box=config.LAMBDA_BOX)
 
     print(f"Training on device: {device}")
 
@@ -24,9 +32,14 @@ def train_model(model, train_loader, val_loader, epochs=20, lr=1e-3, device="cud
             images = images.to(device)
 
             # Build Targets on the fly
-            target_conf, target_boxes = build_targets(
-                batch_boxes, grid_shape=(12, 20), img_size=(640, 384)
-            )
+            if is_ball_model:
+                target_conf, target_boxes = build_ball_targets(
+                    batch_boxes, grid_shape=config.BALL_GRID_SHAPE, img_size=config.FINAL_IMAGE_SIZE
+                )
+            else:
+                target_conf, target_boxes = build_player_targets(
+                    batch_boxes, grid_shape=config.PLAYER_GRID_SHAPE, img_size=config.FINAL_IMAGE_SIZE
+                )
 
             # Forward Pass & Compute Loss with AMP
             with torch.autocast(device_type="cuda", enabled=scaler is not None):
@@ -61,9 +74,16 @@ def train_model(model, train_loader, val_loader, epochs=20, lr=1e-3, device="cud
             for images, batch_boxes in val_loader:
                 images = images.to(device)
                 pred_conf, pred_boxes = model(images)
-                target_conf, target_boxes = build_targets(
-                    batch_boxes, grid_shape=(12, 20), img_size=(640, 384)
-                )
+                
+                if is_ball_model:
+                    target_conf, target_boxes = build_ball_targets(
+                        batch_boxes, grid_shape=config.BALL_GRID_SHAPE, img_size=config.FINAL_IMAGE_SIZE
+                    )
+                else:
+                    target_conf, target_boxes = build_player_targets(
+                        batch_boxes, grid_shape=config.PLAYER_GRID_SHAPE, img_size=config.FINAL_IMAGE_SIZE
+                    )
+                    
                 loss, _, _ = criterion(pred_conf, pred_boxes, target_conf, target_boxes)
                 total_val_loss += loss.item()
 
@@ -75,5 +95,6 @@ def train_model(model, train_loader, val_loader, epochs=20, lr=1e-3, device="cud
         )
 
     # Save trained model weights
-    torch.save(model.state_dict(), "output/tennis_player_detector.pth")
-    print("Model weights successfully saved to tennis_player_detector.pth!")
+    save_path = "output/tennis_ball_detector.pth" if is_ball_model else "output/tennis_player_detector.pth"
+    torch.save(model.state_dict(), save_path)
+    print(f"Model weights successfully saved to {save_path}!")

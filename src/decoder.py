@@ -3,10 +3,10 @@ import torchvision
 import config
 
 
-def decode_predictions(pred_conf, pred_boxes, conf_thresh=0.3, iou_thresh=0.5):
+def decode_predictions(pred_conf, pred_boxes, conf_thresh=0.3, iou_thresh=0.5, max_detections=2):
     """
     Extracts high-confidence boxes using Non-Maximum Suppression (NMS)
-    and returns the top 2.
+    and returns the top `max_detections`.
     """
     img_w, img_h = config.FINAL_IMAGE_SIZE
     grid_h, grid_w = pred_conf.shape[0], pred_conf.shape[1]
@@ -50,8 +50,8 @@ def decode_predictions(pred_conf, pred_boxes, conf_thresh=0.3, iou_thresh=0.5):
     # Apply Non-Maximum Suppression to remove overlapping boxes
     keep_idx = torchvision.ops.nms(boxes_tensor, scores_tensor, iou_thresh)
     
-    # Limit to top 2 players
-    keep_idx = keep_idx[:2]
+    # Limit to top N detections
+    keep_idx = keep_idx[:max_detections]
     
     final_boxes = boxes_tensor[keep_idx]
     final_scores = scores_tensor[keep_idx]

@@ -1,5 +1,5 @@
 from utils import read_video, write_video
-from model import PlayerDetectionModel
+from model import PlayerDetectionModel, BallDetectionModel
 from decoder import decode_predictions
 import config
 import torch
@@ -9,7 +9,7 @@ import time
 import argparse
 
 
-def run_inference(model, device, frame_bgr):
+def run_inference(player_model, ball_model, device, frame_bgr):
     # Preprocess Frame
     h_orig, w_orig = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -19,23 +19,33 @@ def run_inference(model, device, frame_bgr):
 
     # Predict
     with torch.no_grad():
-        pred_conf, pred_boxes = model(tensor_img)
-        # Squeeze batch dimension
-        boxes, scores = decode_predictions(pred_conf[0], pred_boxes[0])
+        pred_conf_player, pred_boxes_player = player_model(tensor_img)
+        pred_conf_ball, pred_boxes_ball = ball_model(tensor_img)
+        
+        # Squeeze batch dimension and decode
+        p_boxes, p_scores = decode_predictions(
+            pred_conf_player[0], pred_boxes_player[0], 
+            conf_thresh=config.PLAYER_CONF_THRESH, max_detections=2
+        )
+        b_boxes, b_scores = decode_predictions(
+            pred_conf_ball[0], pred_boxes_ball[0], 
+            conf_thresh=config.BALL_CONF_THRESH, max_detections=1
+        )
 
     # Scale boxes back to original video resolution
     scale_x = w_orig / config.FINAL_IMAGE_SIZE[0]
     scale_y = h_orig / config.FINAL_IMAGE_SIZE[1]
 
-    valid_boxes = []
+    valid_p_boxes = []
+    valid_b_boxes = []
 
-    for box, score in zip(boxes, scores):
-        if score < 0.5:
+    # Draw Players (Green)
+    for box, score in zip(p_boxes, p_scores):
+        if score < config.PLAYER_CONF_THRESH:
             continue
 
         x1, y1, x2, y2 = box.cpu().numpy()
 
-        # Calculate normalized YOLO coordinates (center_x, center_y, width, height)
         xc = (x1 + x2) / 2.0
         yc = (y1 + y2) / 2.0
         w = x2 - x1
@@ -46,7 +56,7 @@ def run_inference(model, device, frame_bgr):
         norm_w = max(0.0, min(1.0, w / config.FINAL_IMAGE_SIZE[0]))
         norm_h = max(0.0, min(1.0, h / config.FINAL_IMAGE_SIZE[1]))
 
-        valid_boxes.append((norm_xc, norm_yc, norm_w, norm_h))
+        valid_p_boxes.append((norm_xc, norm_yc, norm_w, norm_h))
 
         x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
         y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
@@ -62,17 +72,50 @@ def run_inference(model, device, frame_bgr):
             2,
         )
 
-    return frame_bgr, valid_boxes
+    # Draw Ball (Yellow)
+    for box, score in zip(b_boxes, b_scores):
+        if score < config.BALL_CONF_THRESH:
+            continue
+
+        x1, y1, x2, y2 = box.cpu().numpy()
+        
+        xc = (x1 + x2) / 2.0
+        yc = (y1 + y2) / 2.0
+        w = x2 - x1
+        h = y2 - y1
+
+        norm_xc = max(0.0, min(1.0, xc / config.FINAL_IMAGE_SIZE[0]))
+        norm_yc = max(0.0, min(1.0, yc / config.FINAL_IMAGE_SIZE[1]))
+        norm_w = max(0.0, min(1.0, w / config.FINAL_IMAGE_SIZE[0]))
+        norm_h = max(0.0, min(1.0, h / config.FINAL_IMAGE_SIZE[1]))
+
+        valid_b_boxes.append((norm_xc, norm_yc, norm_w, norm_h))
+
+        x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
+        y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
+
+        cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (0, 255, 255), 2)
+        cv2.putText(
+            frame_bgr,
+            f"Ball {score:.2f}",
+            (x1, y1 - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 255),
+            2,
+        )
+
+    return frame_bgr, valid_p_boxes, valid_b_boxes
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run tennis player detection inference."
+        description="Run tennis player & ball detection inference."
     )
     parser.add_argument(
         "--save-dataset",
         action="store_true",
-        help="Save frames and labels when exactly 2 players are detected",
+        help="Save frames and labels when players or ball are detected",
     )
     parser.add_argument(
         "--rm", action="store_true", help="Remove previous saved output dataset"
@@ -80,11 +123,21 @@ def main():
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = PlayerDetectionModel(pretrained=False)
-    model.load_state_dict(
-        torch.load("output/tennis_player_detector.pth", map_location=device)
+    
+    # Load Player Model
+    player_model = PlayerDetectionModel(pretrained=False)
+    player_model.load_state_dict(
+        torch.load("output/tennis_player_detector.pth", map_location=device, weights_only=True)
     )
-    model.to(device).eval()
+    player_model.to(device).eval()
+
+    # Load Ball Model
+    ball_model = BallDetectionModel(pretrained=False)
+    if os.path.exists("output/tennis_ball_detector.pth"):
+        ball_model.load_state_dict(
+            torch.load("output/tennis_ball_detector.pth", map_location=device, weights_only=True)
+        )
+    ball_model.to(device).eval()
 
     input_video_path = "input/input_video.mp4"
     frames = read_video(input_video_path)
@@ -98,6 +151,8 @@ def main():
     if args.save_dataset:
         os.makedirs("output/dataset/players/images", exist_ok=True)
         os.makedirs("output/dataset/players/data", exist_ok=True)
+        os.makedirs("output/dataset/balls/images", exist_ok=True)
+        os.makedirs("output/dataset/balls/data", exist_ok=True)
 
     run_timestamp = int(time.time())
     output_frames = []
@@ -107,17 +162,28 @@ def main():
         # Keep a clean copy for the dataset so we don't save drawn boxes
         clean_frame = frame.copy()
 
-        out_frame, valid_boxes = run_inference(model, device, frame)
+        out_frame, valid_p_boxes, valid_b_boxes = run_inference(player_model, ball_model, device, frame)
 
-        if args.save_dataset and len(valid_boxes) == 2:
-            img_path = f"output/dataset/players/images/{run_timestamp}-{frame_id}.jpg"
-            txt_path = f"output/dataset/players/data/{run_timestamp}-{frame_id}.txt"
-
-            cv2.imwrite(img_path, clean_frame)
-
-            with open(txt_path, "w") as f:
-                for b in valid_boxes:
-                    f.write(f"0 {b[0]:.6f} {b[1]:.6f} {b[2]:.6f} {b[3]:.6f}\n")
+        if args.save_dataset:
+            # Save Players Data
+            if len(valid_p_boxes) == 2:
+                img_path = f"output/dataset/players/images/{run_timestamp}-{frame_id}.jpg"
+                txt_path = f"output/dataset/players/data/{run_timestamp}-{frame_id}.txt"
+                cv2.imwrite(img_path, clean_frame)
+                with open(txt_path, "w") as f:
+                    for b in valid_p_boxes:
+                        f.write(f"0 {b[0]:.6f} {b[1]:.6f} {b[2]:.6f} {b[3]:.6f}\n")
+            
+            # Save Ball Data
+            if len(valid_b_boxes) == 1:
+                img_path = f"output/dataset/balls/images/{run_timestamp}-{frame_id}.jpg"
+                txt_path = f"output/dataset/balls/data/{run_timestamp}-{frame_id}.txt"
+                # If we didn't already save the image for the players, save it now
+                if not os.path.exists(img_path):
+                    cv2.imwrite(img_path, clean_frame)
+                with open(txt_path, "w") as f:
+                    for b in valid_b_boxes:
+                        f.write(f"0 {b[0]:.6f} {b[1]:.6f} {b[2]:.6f} {b[3]:.6f}\n")
 
         output_frames.append(out_frame)
         completed += 1
