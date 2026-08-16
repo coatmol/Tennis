@@ -68,23 +68,6 @@ class BallDataset(Dataset):
         boxes = []
         for ball in items[1:]:
             boxes.append([ball.min_x, ball.min_y, ball.max_x, ball.max_y])
-            
-        # Hard Negative Mining: 20% of the time, physically erase the ball with a gray box
-        # and delete its bounding box so the model is forced to look at empty courts!
-        if self.is_train and len(boxes) > 0 and torch.rand(1).item() < 0.2:
-            x1, y1, x2, y2 = boxes[0]
-            # Add a small padding to completely wipe the ball
-            pad = 10
-            ex1 = max(0, int(x1) - pad)
-            ey1 = max(0, int(y1) - pad)
-            ex2 = min(640, int(x2) + pad)
-            ey2 = min(384, int(y2) + pad)
-            
-            # Fill with gray
-            img_tensor[:, ey1:ey2, ex1:ex2] = 0.5
-            
-            # Delete all boxes for this image
-            boxes = []
 
         if len(boxes) == 0:
             boxes_tensor = torch.zeros((0, 4), dtype=torch.float32)
