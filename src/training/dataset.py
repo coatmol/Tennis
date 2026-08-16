@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms.v2 as v2
 
 
 class PlayerDataset(Dataset):
@@ -22,7 +23,9 @@ class PlayerDataset(Dataset):
         # Format Boxes: List of [id, x1, y1, x2, y2]
         boxes = []
         for player in items[1:]:
-            boxes.append([player.id, player.min_x, player.min_y, player.max_x, player.max_y])
+            boxes.append(
+                [player.id, player.min_x, player.min_y, player.max_x, player.max_y]
+            )
 
         if len(boxes) == 0:
             boxes_tensor = torch.zeros((0, 5), dtype=torch.float32)
@@ -43,21 +46,30 @@ def collate_fn(batch):
     return images_stacked, boxes
 
 
-import torchvision.transforms.v2 as v2
-
 class BallDataset(Dataset):
     def __init__(self, parsed_data: dict, is_train: bool = False) -> None:
         super().__init__()
         self.keys = list(parsed_data.keys())
         self.data = parsed_data
         self.is_train = is_train
-        
+
         # Aggressive augmentations to force learning shape instead of just color
-        self.transform = v2.Compose([
-            v2.RandomApply([v2.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)], p=0.8),
-            v2.RandomApply([v2.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))], p=0.5),
-            v2.RandomAdjustSharpness(sharpness_factor=2.0, p=0.5),
-        ])
+        self.transform = v2.Compose(
+            [
+                v2.RandomApply(
+                    [
+                        v2.ColorJitter(
+                            brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
+                        )
+                    ],
+                    p=0.8,
+                ),
+                v2.RandomApply(
+                    [v2.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))], p=0.5
+                ),
+                v2.RandomAdjustSharpness(sharpness_factor=2.0, p=0.5),
+            ]
+        )
 
     def __len__(self):
         return len(self.keys)
