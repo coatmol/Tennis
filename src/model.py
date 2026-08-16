@@ -170,11 +170,51 @@ class FocalDetectionLoss(nn.Module):
             pred_conf.size(0) * pred_conf.size(1) * pred_conf.size(2)
         )
 
-        # 2. Bounding Box Loss (same as player model)
         mask = target_conf == 1.0
-
+        
         if mask.sum() > 0:
-            loss_box = self.l1(pred_boxes[mask], target_boxes[mask]) / mask.sum()
+            b, gy, gx = torch.where(mask)
+            
+            p_boxes = pred_boxes[mask]
+            t_boxes = target_boxes[mask]
+            
+            loss_l1 = self.l1(p_boxes, t_boxes) / mask.sum()
+            
+            # Decode to Absolute Coordinates for GIoU
+            stride_w = 640 / target_boxes.size(2)
+            stride_h = 384 / target_boxes.size(1)
+            
+            pred_dx, pred_dy, pred_w_norm, pred_h_norm = p_boxes.unbind(-1)
+            t_dx, t_dy, t_w_norm, t_h_norm = t_boxes.unbind(-1)
+            
+            # Prevent negative widths/heights which crash GIoU
+            pred_w = torch.clamp(pred_w_norm, min=1e-4) * 640
+            pred_h = torch.clamp(pred_h_norm, min=1e-4) * 384
+            t_w = t_w_norm * 640
+            t_h = t_h_norm * 384
+            
+            pred_xc = (gx + pred_dx) * stride_w
+            pred_yc = (gy + pred_dy) * stride_h
+            t_xc = (gx + t_dx) * stride_w
+            t_yc = (gy + t_dy) * stride_h
+            
+            p_x1 = pred_xc - pred_w / 2
+            p_y1 = pred_yc - pred_h / 2
+            p_x2 = pred_xc + pred_w / 2
+            p_y2 = pred_yc + pred_h / 2
+            
+            t_x1 = t_xc - t_w / 2
+            t_y1 = t_yc - t_h / 2
+            t_x2 = t_xc + t_w / 2
+            t_y2 = t_yc + t_h / 2
+            
+            decoded_p = torch.stack([p_x1, p_y1, p_x2, p_y2], dim=-1)
+            decoded_t = torch.stack([t_x1, t_y1, t_x2, t_y2], dim=-1)
+            
+            from torchvision.ops import generalized_box_iou_loss
+            loss_giou = generalized_box_iou_loss(decoded_p, decoded_t, reduction='sum') / mask.sum()
+            
+            loss_box = loss_l1 + (2.0 * loss_giou)
         else:
             loss_box = torch.tensor(0.0, device=pred_conf.device)
 
