@@ -24,3 +24,5 @@ def write_video(frames, path: str):
         out.write(frame)
 
     out.release()
+
+    print(f"Successfully saved output video file to {path}")

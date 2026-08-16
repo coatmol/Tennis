@@ -1,8 +1,7 @@
 from pathlib import Path
 from collections import namedtuple
 import cv2
-import os
-from . import config
+import config
 
 PlayerData = namedtuple("PlayerData", ["id", "min_x", "min_y", "max_x", "max_y"])
 

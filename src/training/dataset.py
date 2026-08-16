@@ -19,13 +19,13 @@ class PlayerDataset(Dataset):
         raw_img = items[0]
         img_tensor = torch.from_numpy(raw_img).permute(2, 0, 1).float() / 255.0
 
-        # Format Boxes: List of [x1, y1, x2, y2]
+        # Format Boxes: List of [id, x1, y1, x2, y2]
         boxes = []
         for player in items[1:]:
-            boxes.append([player.min_x, player.min_y, player.max_x, player.max_y])
+            boxes.append([player.id, player.min_x, player.min_y, player.max_x, player.max_y])
 
         if len(boxes) == 0:
-            boxes_tensor = torch.zeros((0, 4), dtype=torch.float32)
+            boxes_tensor = torch.zeros((0, 5), dtype=torch.float32)
         else:
             boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
 

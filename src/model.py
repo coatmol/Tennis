@@ -1,4 +1,5 @@
 import torch
+import math
 import torch.nn as nn
 from torchvision.models import resnet18, ResNet18_Weights
 
@@ -38,7 +39,10 @@ class PlayerDetectionModel(nn.Module):
         out = out.permute(0, 2, 3, 1)
 
         # Separate confidence from bounding box offsets
-        confidence = torch.sigmoid(out[..., 0])
+        confidence = out[..., 0]
+        if not self.training:
+            confidence = torch.sigmoid(confidence)
+            
         bbox_preds = out[..., 1:]
 
         return confidence, bbox_preds
@@ -47,7 +51,7 @@ class PlayerDetectionModel(nn.Module):
 class DetectionLoss(nn.Module):
     def __init__(self, lambda_box=5.0):
         super().__init__()
-        self.bce = nn.BCELoss()
+        self.bce = nn.BCEWithLogitsLoss()
         self.l1 = nn.SmoothL1Loss(reduction="sum")
         self.lambda_box = lambda_box
 
@@ -72,43 +76,48 @@ class DetectionLoss(nn.Module):
         return total_loss, loss_conf, loss_box
 
 
+def assign_gaussian_target(target_conf, b, gy, gx, box_w, box_h, grid_h=12, grid_w=20):
+    """
+    Spreads positive confidence across neighboring cells for large boxes.
+    """
+    # Calculate radius based on box size (larger near-player gets wider Gaussian)
+    sigma = max(1.0, min(box_w, box_h) / 64.0)
+    radius = int(math.ceil(3 * sigma))
+
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            ny, nx = gy + dy, gx + dx
+            if 0 <= ny < grid_h and 0 <= nx < grid_w:
+                # Gaussian heat value based on distance from center
+                value = math.exp(-(dx**2 + dy**2) / (2 * sigma**2))
+                target_conf[b, ny, nx] = max(target_conf[b, ny, nx].item(), value)
+
+
 def build_targets(boxes_batch, grid_shape=(12, 20), img_size=(640, 384)):
-    """
-    Converts list of variable ground-truth boxes per image into
-    dense target tensors matching model output shapes.
-    """
     grid_h, grid_w = grid_shape
     img_w, img_h = img_size
-    stride_w = img_w / grid_w  # 32 pixels
-    stride_h = img_h / grid_h  # 32 pixels
+    stride_w, stride_h = img_w / grid_w, img_h / grid_h
 
     batch_size = len(boxes_batch)
     target_conf = torch.zeros((batch_size, grid_h, grid_w), dtype=torch.float32)
     target_boxes = torch.zeros((batch_size, grid_h, grid_w, 4), dtype=torch.float32)
 
     for b in range(batch_size):
-        boxes = boxes_batch[b]  # Shape: [N_players, 4] -> [x1, y1, x2, y2]
-        for box in boxes:
-            x1, y1, x2, y2 = box.tolist()
+        for box in boxes_batch[b]:
+            p_id, x1, y1, x2, y2 = box.tolist() if isinstance(box, torch.Tensor) else box
 
-            # Compute center point and box dimensions
-            xc = (x1 + x2) / 2.0
-            yc = (y1 + y2) / 2.0
-            bw = x2 - x1
-            bh = y2 - y1
+            xc, yc = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            bw, bh = x2 - x1, y2 - y1
 
-            # Find grid cell index
             gx = min(int(xc / stride_w), grid_w - 1)
             gy = min(int(yc / stride_h), grid_h - 1)
 
-            # Calculate cell offsets (0.0 to 1.0) and normalized width/height
+            # Spread target confidence using Gaussian heatmap
+            assign_gaussian_target(target_conf, b, gy, gx, bw, bh, grid_h, grid_w)
+
+            # Store box coordinate offsets at center cell
             dx = (xc / stride_w) - gx
             dy = (yc / stride_h) - gy
-            w_norm = bw / img_w
-            h_norm = bh / img_h
-
-            # Assign to targets
-            target_conf[b, gy, gx] = 1.0
-            target_boxes[b, gy, gx] = torch.tensor([dx, dy, w_norm, h_norm])
+            target_boxes[b, gy, gx] = torch.tensor([dx, dy, bw / img_w, bh / img_h])
 
     return target_conf, target_boxes
