@@ -6,12 +6,7 @@ import torch
 import cv2
 
 
-def run_inference(model_path: str, frame_bgr):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = PlayerDetectionModel(pretrained=False)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.to(device).eval()
-
+def run_inference(model, device, frame_bgr):
     # Preprocess Frame
     h_orig, w_orig = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -30,6 +25,9 @@ def run_inference(model_path: str, frame_bgr):
     scale_y = h_orig / config.FINAL_IMAGE_SIZE[1]
 
     for box, score in zip(boxes, scores):
+        if score < 0.5:
+            continue
+            
         x1, y1, x2, y2 = box.cpu().numpy()
         x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
         y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
@@ -49,13 +47,18 @@ def run_inference(model_path: str, frame_bgr):
 
 
 def main():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = PlayerDetectionModel(pretrained=False)
+    model.load_state_dict(torch.load("output/tennis_player_detector.pth", map_location=device))
+    model.to(device).eval()
+
     input_video_path = "input/input_video.mp4"
     frames = read_video(input_video_path)
 
     output_frames = []
     completed = 0
     for frame in frames:
-        out_frame = run_inference("output/tennis_player_detector.pth", frame)
+        out_frame = run_inference(model, device, frame)
         output_frames.append(out_frame)
         completed += 1
 
