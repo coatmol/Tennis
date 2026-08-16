@@ -47,4 +47,4 @@ if __name__ == "__main__":
 
     model = PlayerDetectionModel(pretrained=True)
 
-    train_model(model, train_loader, val_loader, 20, device=device)
+    train_model(model, train_loader, val_loader, config.TRAIN_EPOCHS, device=device)

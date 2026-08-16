@@ -4,6 +4,9 @@ from decoder import decode_predictions
 import config
 import torch
 import cv2
+import os
+import time
+import argparse
 
 
 def run_inference(model, device, frame_bgr):
@@ -24,11 +27,27 @@ def run_inference(model, device, frame_bgr):
     scale_x = w_orig / config.FINAL_IMAGE_SIZE[0]
     scale_y = h_orig / config.FINAL_IMAGE_SIZE[1]
 
+    valid_boxes = []
+
     for box, score in zip(boxes, scores):
         if score < 0.5:
             continue
-            
+
         x1, y1, x2, y2 = box.cpu().numpy()
+
+        # Calculate normalized YOLO coordinates (center_x, center_y, width, height)
+        xc = (x1 + x2) / 2.0
+        yc = (y1 + y2) / 2.0
+        w = x2 - x1
+        h = y2 - y1
+
+        norm_xc = max(0.0, min(1.0, xc / config.FINAL_IMAGE_SIZE[0]))
+        norm_yc = max(0.0, min(1.0, yc / config.FINAL_IMAGE_SIZE[1]))
+        norm_w = max(0.0, min(1.0, w / config.FINAL_IMAGE_SIZE[0]))
+        norm_h = max(0.0, min(1.0, h / config.FINAL_IMAGE_SIZE[1]))
+
+        valid_boxes.append((norm_xc, norm_yc, norm_w, norm_h))
+
         x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
         y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
 
@@ -43,26 +62,68 @@ def run_inference(model, device, frame_bgr):
             2,
         )
 
-    return frame_bgr
+    return frame_bgr, valid_boxes
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Run tennis player detection inference."
+    )
+    parser.add_argument(
+        "--save-dataset",
+        action="store_true",
+        help="Save frames and labels when exactly 2 players are detected",
+    )
+    parser.add_argument(
+        "--rm", action="store_true", help="Remove previous saved output dataset"
+    )
+    args = parser.parse_args()
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = PlayerDetectionModel(pretrained=False)
-    model.load_state_dict(torch.load("output/tennis_player_detector.pth", map_location=device))
+    model.load_state_dict(
+        torch.load("output/tennis_player_detector.pth", map_location=device)
+    )
     model.to(device).eval()
 
     input_video_path = "input/input_video.mp4"
     frames = read_video(input_video_path)
 
+    if args.rm:
+        import shutil
+
+        if os.path.exists("output/dataset"):
+            shutil.rmtree("output/dataset")
+
+    if args.save_dataset:
+        os.makedirs("output/dataset/players/images", exist_ok=True)
+        os.makedirs("output/dataset/players/data", exist_ok=True)
+
+    run_timestamp = int(time.time())
     output_frames = []
     completed = 0
-    for frame in frames:
-        out_frame = run_inference(model, device, frame)
+
+    for frame_id, frame in enumerate(frames):
+        # Keep a clean copy for the dataset so we don't save drawn boxes
+        clean_frame = frame.copy()
+
+        out_frame, valid_boxes = run_inference(model, device, frame)
+
+        if args.save_dataset and len(valid_boxes) == 2:
+            img_path = f"output/dataset/players/images/{run_timestamp}-{frame_id}.jpg"
+            txt_path = f"output/dataset/players/data/{run_timestamp}-{frame_id}.txt"
+
+            cv2.imwrite(img_path, clean_frame)
+
+            with open(txt_path, "w") as f:
+                for b in valid_boxes:
+                    f.write(f"0 {b[0]:.6f} {b[1]:.6f} {b[2]:.6f} {b[3]:.6f}\n")
+
         output_frames.append(out_frame)
         completed += 1
 
-        print(f"Completed Inference on [{completed}/{len(frames)}] frames")
+        if completed % 10 == 0:
+            print(f"Completed Inference on [{completed}/{len(frames)}] frames")
 
     write_video(output_frames, "output/output_video.mp4")
 

@@ -1,3 +1,4 @@
+import time
 import torch
 from torch.utils.data import DataLoader
 from model import *
@@ -15,6 +16,7 @@ def train_model(model, train_loader, val_loader, epochs=20, lr=1e-3, device="cud
     scaler = torch.GradScaler("cuda") if str(device).startswith("cuda") else None
 
     for epoch in range(1, epochs + 1):
+        epoch_start_time = time.time()
         model.train()
         total_train_loss = 0.0
 
@@ -66,9 +68,10 @@ def train_model(model, train_loader, val_loader, epochs=20, lr=1e-3, device="cud
                 total_val_loss += loss.item()
 
         avg_val_loss = total_val_loss / len(val_loader)
+        epoch_time = time.time() - epoch_start_time
 
         print(
-            f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}"
+            f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Time Taken: {epoch_time:.2f}s"
         )
 
     # Save trained model weights
