@@ -9,7 +9,7 @@ import time
 import argparse
 
 
-def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos):
+def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos, stationary_count):
     # Preprocess Frame
     h_orig, w_orig = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -27,7 +27,7 @@ def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos):
             pred_conf_player[0], pred_boxes_player[0], 
             conf_thresh=config.PLAYER_CONF_THRESH, max_detections=2
         )
-        # Decode top 5 balls so we don't accidentally throw away the real ball if a shoe scores slightly higher!
+        # Decode top 5 balls
         b_boxes_all, b_scores_all = decode_predictions(
             pred_conf_ball[0], pred_boxes_ball[0], 
             conf_thresh=config.BALL_CONF_THRESH, max_detections=5
@@ -76,6 +76,10 @@ def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos):
     valid_b_boxes = []
     best_ball_idx = -1
     best_ball_dist = float('inf')
+    
+    # Check if we should forcefully reset the tracker (stuck on a white line)
+    if stationary_count >= 3:
+        last_ball_pos = None
 
     # Find the best valid ball
     for i, (box, score) in enumerate(zip(b_boxes_all, b_scores_all)):
@@ -103,12 +107,12 @@ def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos):
             continue
             
         # 2. TRACKER: Distance Heuristic
-        # If we have a last known position, prefer the ball that is physically closest to it
         if last_ball_pos is not None:
             dist = ((xc - last_ball_pos[0]) ** 2 + (yc - last_ball_pos[1]) ** 2) ** 0.5
-            # A tennis ball won't travel more than ~150 normalized pixels in 1 frame
+            
+            # Reject massive teleportations
             if dist > 150:
-                continue # Reject massive teleportations (like white court lines across the pitch)
+                continue 
             
             if dist < best_ball_dist:
                 best_ball_dist = dist
@@ -131,6 +135,16 @@ def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos):
         w = x2 - x1
         h = y2 - y1
         
+        # Update Stationary Count
+        if last_ball_pos is not None:
+            dist = ((xc - last_ball_pos[0]) ** 2 + (yc - last_ball_pos[1]) ** 2) ** 0.5
+            if dist < 5:  # Hasn't moved more than 5 pixels
+                stationary_count += 1
+            else:
+                stationary_count = 0
+        else:
+            stationary_count = 0
+            
         current_ball_pos = (xc, yc) # Update history
 
         norm_xc = max(0.0, min(1.0, xc / config.FINAL_IMAGE_SIZE[0]))
@@ -153,8 +167,12 @@ def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos):
             (0, 255, 255),
             2,
         )
+    else:
+        # We lost the ball
+        current_ball_pos = None
+        stationary_count = 0
 
-    return frame_bgr, valid_p_boxes, valid_b_boxes, current_ball_pos
+    return frame_bgr, valid_p_boxes, valid_b_boxes, current_ball_pos, stationary_count
 
 
 def main():
@@ -207,13 +225,14 @@ def main():
     output_frames = []
     completed = 0
     last_ball_pos = None
+    stationary_count = 0
 
     for frame_id, frame in enumerate(frames):
         # Keep a clean copy for the dataset so we don't save drawn boxes
         clean_frame = frame.copy()
 
-        out_frame, valid_p_boxes, valid_b_boxes, last_ball_pos = run_inference(
-            player_model, ball_model, device, frame, last_ball_pos
+        out_frame, valid_p_boxes, valid_b_boxes, last_ball_pos, stationary_count = run_inference(
+            player_model, ball_model, device, frame, last_ball_pos, stationary_count
         )
 
         if args.save_dataset:
