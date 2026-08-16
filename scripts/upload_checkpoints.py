@@ -14,7 +14,8 @@ api = HfApi()
 
 checkpoints = [
     ("output/tennis_ball_detector.pth", "tennis_ball_detector.pth"),
-    ("output/tennis_player_detector.pth", "tennis_player_detector.pth")
+    ("output/tennis_player_detector.pth", "tennis_player_detector.pth"),
+    ("output/yolo_balls/weights/best.pt", "yolo_ball_detector.pt")
 ]
 
 print(f"Uploading checkpoints to Hugging Face repository {REPO}...")
