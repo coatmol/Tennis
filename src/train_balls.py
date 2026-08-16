@@ -22,8 +22,8 @@ if __name__ == "__main__":
     train_data = {k: full_ball_data[k] for k in train_keys}
     val_data = {k: full_ball_data[k] for k in val_keys}
 
-    train_dataset = BallDataset(train_data)
-    val_dataset = BallDataset(val_data)
+    train_dataset = BallDataset(train_data, is_train=True)
+    val_dataset = BallDataset(val_data, is_train=False)
 
     # Create PyTorch DataLoaders
     train_loader = DataLoader(

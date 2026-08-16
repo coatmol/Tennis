@@ -55,9 +55,15 @@ class BallDetectionModel(nn.Module):
         weights = ResNet18_Weights.DEFAULT if pretrained else None
         resnet = resnet18(weights=weights)
 
-        # Keep up to layer2 (Indices 0 to 5)
-        # Input: [B, 3, 384, 640] -> Output Feature Map: [B, 128, 48, 80]
-        self.backbone = nn.Sequential(*list(resnet.children())[:-4])
+        # Layer 0: [B, 64, 96, 160] (stride 4)
+        self.layer0 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool)
+        self.layer1 = resnet.layer1 # [B, 64, 96, 160]
+        self.layer2 = resnet.layer2 # [B, 128, 48, 80]
+        self.layer3 = resnet.layer3 # [B, 256, 24, 40]
+
+        # FPN Top-Down
+        self.toplayer = nn.Conv2d(256, 128, kernel_size=1)
+        self.smooth = nn.Conv2d(128, 128, kernel_size=3, padding=1)
 
         # Convolutional Detection Head
         self.head = nn.Sequential(
@@ -71,8 +77,17 @@ class BallDetectionModel(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
-        # Forward pass through backbone
-        features = self.backbone(x)  # [Batch, 128, 48, 80]
+        x = self.layer0(x)
+        x = self.layer1(x)
+        
+        l2 = self.layer2(x) # [Batch, 128, 48, 80]
+        l3 = self.layer3(l2) # [Batch, 256, 24, 40]
+
+        # Top-down FPN logic
+        p3 = self.toplayer(l3)
+        p3_upsampled = nn.functional.interpolate(p3, size=(48, 80), mode="bilinear", align_corners=False)
+        p2 = l2 + p3_upsampled
+        features = self.smooth(p2) # [Batch, 128, 48, 80]
 
         # Forward pass through head
         out = self.head(features)  # [Batch, 5, 48, 80]

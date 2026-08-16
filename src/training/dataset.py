@@ -43,11 +43,21 @@ def collate_fn(batch):
     return images_stacked, boxes
 
 
+import torchvision.transforms.v2 as v2
+
 class BallDataset(Dataset):
-    def __init__(self, parsed_data: dict) -> None:
+    def __init__(self, parsed_data: dict, is_train: bool = False) -> None:
         super().__init__()
         self.keys = list(parsed_data.keys())
         self.data = parsed_data
+        self.is_train = is_train
+        
+        # Aggressive augmentations to force learning shape instead of just color
+        self.transform = v2.Compose([
+            v2.RandomApply([v2.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)], p=0.8),
+            v2.RandomApply([v2.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))], p=0.5),
+            v2.RandomAdjustSharpness(sharpness_factor=2.0, p=0.5),
+        ])
 
     def __len__(self):
         return len(self.keys)
@@ -59,6 +69,9 @@ class BallDataset(Dataset):
         # Format Image: [H, W, C] -> [C, H, W], normalized [0.0, 1.0]
         raw_img = items[0]
         img_tensor = torch.from_numpy(raw_img).permute(2, 0, 1).float() / 255.0
+
+        if self.is_train:
+            img_tensor = self.transform(img_tensor)
 
         # Format Boxes: List of [x1, y1, x2, y2]
         boxes = []
