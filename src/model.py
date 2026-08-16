@@ -76,6 +76,13 @@ class BallDetectionModel(nn.Module):
             nn.Conv2d(64, 5, kernel_size=1),
         )
 
+        # VERY IMPORTANT: Focal Loss Bias Initialization
+        # Since 99.9% of the grid is background (0), the model will just immediately learn to predict 0 everywhere
+        # To fix this, we initialize the bias of the confidence channel so it starts by predicting a very low probability (~0.01)
+        pi = 0.01
+        b = -math.log((1 - pi) / pi)
+        nn.init.constant_(self.head[-1].bias[0], b)
+
     def forward(self, x: torch.Tensor):
         x = self.layer0(x)
         x = self.layer1(x)

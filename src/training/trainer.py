@@ -30,10 +30,10 @@ def train_model(
             alpha=0.25, gamma=2.0, lambda_box=config.LAMBDA_BOX
         )
         # GPU-accelerated augmentations
+        # Relaxed augmentations so we don't completely blur out the 4-pixel ball
         gpu_transforms = v2.Compose([
-            v2.RandomApply([v2.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)], p=0.8),
-            v2.RandomApply([v2.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))], p=0.5),
-            v2.RandomAdjustSharpness(sharpness_factor=2.0, p=0.5),
+            v2.RandomApply([v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05)], p=0.5),
+            v2.RandomAdjustSharpness(sharpness_factor=2.0, p=0.3),
         ]).to(device)
     else:
         criterion = DetectionLoss(lambda_box=config.LAMBDA_BOX)
