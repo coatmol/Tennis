@@ -161,23 +161,14 @@ def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos, st
 
         x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
         y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
-
-        cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (0, 255, 255), 2)
-        cv2.putText(
-            frame_bgr,
-            f"Ball {score:.2f}",
-            (x1, y1 - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 255, 255),
-            2,
-        )
+        best_ball_box_scaled = (x1, y1, x2, y2, score)
     else:
         # We lost the ball
         current_ball_pos = None
         stationary_count = 0
+        best_ball_box_scaled = [None, None, None, None, None]
 
-    return frame_bgr, valid_p_boxes, valid_b_boxes, current_ball_pos, stationary_count
+    return frame_bgr, valid_p_boxes, valid_b_boxes, current_ball_pos, stationary_count, best_ball_box_scaled
 
 
 def main():
@@ -237,6 +228,7 @@ def main():
 
     run_timestamp = int(time.time())
     output_frames = []
+    ball_boxes = []
     completed = 0
     last_ball_pos = None
     stationary_count = 0
@@ -245,9 +237,11 @@ def main():
         # Keep a clean copy for the dataset so we don't save drawn boxes
         clean_frame = frame.copy()
 
-        out_frame, valid_p_boxes, valid_b_boxes, last_ball_pos, stationary_count = run_inference(
+        out_frame, valid_p_boxes, valid_b_boxes, last_ball_pos, stationary_count, best_ball_box_scaled = run_inference(
             player_model, ball_model, device, frame, last_ball_pos, stationary_count
         )
+        
+        ball_boxes.append(best_ball_box_scaled)
 
         if args.save_dataset:
             # Save Players Data
@@ -275,6 +269,27 @@ def main():
 
         if completed % 10 == 0:
             print(f"Completed Inference on [{completed}/{len(frames)}] frames")
+
+    # Interpolate missing ball detections
+    if ball_boxes:
+        df = pd.DataFrame(ball_boxes, columns=['x1', 'y1', 'x2', 'y2', 'score'])
+        df = df.interpolate(method='linear', limit_direction='both')
+        
+        for i, frame in enumerate(output_frames):
+            row = df.iloc[i]
+            if not pd.isna(row['x1']):
+                x1, y1, x2, y2 = int(row['x1']), int(row['y1']), int(row['x2']), int(row['y2'])
+                score = row['score'] if not pd.isna(row['score']) else 0.0
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                cv2.putText(
+                    frame,
+                    f"Ball {score:.2f}",
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
+                    2,
+                )
 
     write_video(output_frames, "output/output_video.mp4")
 

@@ -3,3 +3,4 @@ opencv-python
 huggingface_hub
 python-dotenv
 ultralytics
+pandas
