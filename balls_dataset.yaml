@@ -1,0 +1,5 @@
+names:
+  0: ball
+path: C:\Dev\Tennis\input\dataset\balls
+train: images
+val: images

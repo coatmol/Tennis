@@ -5,15 +5,7 @@ from ultralytics import YOLO
 
 def main():
     base_dir = os.path.abspath("input/dataset/balls")
-    data_dir = os.path.join(base_dir, "data")
-    labels_dir = os.path.join(base_dir, "labels")
     
-    # YOLO requires the annotation folder to be named 'labels', not 'data'.
-    # We will simply symlink or copy it.
-    if os.path.exists(data_dir) and not os.path.exists(labels_dir):
-        print("Copying 'data' folder to 'labels' for YOLO compatibility...")
-        shutil.copytree(data_dir, labels_dir)
-        
     yaml_path = "balls_dataset.yaml"
     yaml_data = {
         'path': base_dir,
@@ -33,12 +25,22 @@ def main():
         data=yaml_path,
         epochs=40,
         imgsz=640,
-        project="output",
+        project=os.path.abspath("output"),
         name="yolo_balls",
-        device="0" # Use GPU
+        exist_ok=True, # Prevent it from making yolo_balls-2, yolo_balls-3, etc.
+        device="0", # Use GPU
+        workers=0   # Disable multiprocessing to prevent Windows memory/paging file crashes
     )
     
-    print("Training complete! Best weights saved to output/yolo_balls/weights/best.pt")
+    # Automatically copy the best weights to the root output folder
+    best_weights_path = os.path.join(results.save_dir, "weights", "best.pt")
+    final_weights_path = os.path.abspath(os.path.join("output", "yolo_ball_detector.pt"))
+    
+    if os.path.exists(best_weights_path):
+        shutil.copy(best_weights_path, final_weights_path)
+        print(f"Training complete! Best weights automatically copied to {final_weights_path} for inference.")
+    else:
+        print("Training complete, but could not find best weights to copy.")
 
 if __name__ == "__main__":
     main()

@@ -7,6 +7,7 @@ import cv2
 import os
 import time
 import argparse
+import pandas as pd
 
 
 def run_inference(player_model, ball_model, device, frame_bgr, last_ball_pos, stationary_count):
@@ -204,13 +205,18 @@ def main():
 
     # Load Ball Model (YOLOv8)
     ball_model = None
-    yolo_weights = "output/yolo_balls/weights/best.pt"
+    yolo_weights = "output/yolo_ball_detector.pt"
     try:
         from ultralytics import YOLO
         if os.path.exists(yolo_weights):
             ball_model = YOLO(yolo_weights)
         else:
-            print(f"Warning: YOLO weights not found at {yolo_weights}. Ball detection skipped.")
+            # Fallback for older trained weights
+            old_weights = "output/yolo_balls/weights/best.pt"
+            if os.path.exists(old_weights):
+                ball_model = YOLO(old_weights)
+            else:
+                print(f"Warning: YOLO weights not found at {yolo_weights}. Ball detection skipped.")
     except ImportError:
         print("Warning: ultralytics package not found. Please 'pip install ultralytics'. Ball detection skipped.")
 
@@ -227,7 +233,7 @@ def main():
         os.makedirs("output/dataset/players/images", exist_ok=True)
         os.makedirs("output/dataset/players/data", exist_ok=True)
         os.makedirs("output/dataset/balls/images", exist_ok=True)
-        os.makedirs("output/dataset/balls/data", exist_ok=True)
+        os.makedirs("output/dataset/balls/labels", exist_ok=True) # YOLO expects 'labels' instead of 'data'
 
     run_timestamp = int(time.time())
     output_frames = []
@@ -256,7 +262,7 @@ def main():
             # Save Ball Data
             if len(valid_b_boxes) == 1:
                 img_path = f"output/dataset/balls/images/{run_timestamp}-{frame_id}.jpg"
-                txt_path = f"output/dataset/balls/data/{run_timestamp}-{frame_id}.txt"
+                txt_path = f"output/dataset/balls/labels/{run_timestamp}-{frame_id}.txt"
                 # If we didn't already save the image for the players, save it now
                 if not os.path.exists(img_path):
                     cv2.imwrite(img_path, clean_frame)
